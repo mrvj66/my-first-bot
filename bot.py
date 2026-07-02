@@ -29,26 +29,45 @@ def init_db():
             name TEXT,
             phone TEXT,
             time TEXT,
-            date TEXT
+            date TEXT,
+            status TEXT DEFAULT 'active',
+            user_id INTEGER
         )
     """)
     conn.commit()
     conn.close()
 
-def save_booking(service, name, phone, time):
+def save_booking(service, name, phone, time, user_id):
     conn = sqlite3.connect("bookings.db")
     cursor = conn.cursor()
     cursor.execute(
-        "INSERT INTO bookings (service, name, phone, time, date) VALUES (?, ?, ?, ?, ?)",
-        (service, name, phone, time, datetime.now().strftime("%d.%m.%Y %H:%M"))
+        "INSERT INTO bookings (service, name, phone, time, date, user_id) VALUES (?, ?, ?, ?, ?, ?)",
+        (service, name, phone, time, datetime.now().strftime("%d.%m.%Y %H:%M"), user_id)
     )
+    booking_id = cursor.lastrowid
     conn.commit()
     conn.close()
+    return booking_id
+
+def cancel_booking(booking_id):
+    conn = sqlite3.connect("bookings.db")
+    cursor = conn.cursor()
+    cursor.execute("UPDATE bookings SET status = 'cancelled' WHERE id = ?", (booking_id,))
+    conn.commit()
+    conn.close()
+
+def get_booking_by_id(booking_id):
+    conn = sqlite3.connect("bookings.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, service, name, phone, time, date, status FROM bookings WHERE id = ?", (booking_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return row
 
 def get_all_bookings():
     conn = sqlite3.connect("bookings.db")
     cursor = conn.cursor()
-    cursor.execute("SELECT id, service, name, phone, time, date FROM bookings ORDER BY id DESC")
+    cursor.execute("SELECT id, service, name, phone, time, date, status FROM bookings ORDER BY id DESC")
     rows = cursor.fetchall()
     conn.close()
     return rows
@@ -109,8 +128,9 @@ async def cmd_admin(message: Message):
 
     text = "📋 Все заявки:\n\n"
     for b in bookings:
+        status = "✅ Активна" if b[6] == "active" else "❌ Отменена"
         text += (
-            f"#{b[0]} · {b[5]}\n"
+            f"#{b[0]} · {b[5]} · {status}\n"
             f"📸 Услуга: {b[1]}\n"
             f"👤 Имя: {b[2]}\n"
             f"📞 Телефон: {b[3]}\n"
@@ -119,7 +139,6 @@ async def cmd_admin(message: Message):
         )
 
     await message.answer(text)
-
 @dp.message(Command("portfolio"))
 async def cmd_portfolio(message: Message):
     await message.answer(
@@ -153,6 +172,40 @@ async def cmd_portfolio(message: Message):
         "Нажмите кнопку ниже 👇",
         reply_markup=main_menu
     )
+@dp.message(F.text.startswith("❌ Отменить запись #"))
+async def cancel_handler(message: Message):
+    try:
+        booking_id = int(message.text.split("#")[1])
+        booking = get_booking_by_id(booking_id)
+
+        if not booking:
+            await message.answer("❌ Заявка не найдена.")
+            return
+
+        if booking[6] == "cancelled":
+            await message.answer("⚠️ Эта заявка уже отменена.")
+            return
+
+        cancel_booking(booking_id)
+
+        # Уведомление владельцу
+        await bot.send_message(
+            ADMIN_ID,
+            f"⚠️ Заявка #{booking_id} отменена!\n\n"
+            f"📸 Услуга: {booking[1]}\n"
+            f"👤 Имя: {booking[2]}\n"
+            f"📞 Телефон: {booking[3]}\n"
+            f"🕐 Время: {booking[4]}"
+        )
+
+        await message.answer(
+            f"✅ Заявка #{booking_id} успешно отменена.\n\n"
+            "Если захотите записаться снова — нажмите кнопку ниже 👇",
+            reply_markup=main_menu
+        )
+
+    except Exception as e:
+        await message.answer("❌ Что-то пошло не так. Попробуйте снова.")
 
 # ─── ЗАПИСЬ ───
 @dp.message(F.text == "📅 Записаться")
@@ -201,12 +254,16 @@ async def get_time(message: Message, state: FSMContext):
     data = await state.get_data()
     await state.clear()
 
-    save_booking(data['service'], data['name'], data['phone'], data['time'])
+    booking_id = save_booking(
+        data['service'], data['name'],
+        data['phone'], data['time'],
+        message.from_user.id
+    )
 
     # Уведомление владельцу
     await bot.send_message(
         ADMIN_ID,
-        f"🔔 Новая заявка!\n\n"
+        f"🔔 Новая заявка #{booking_id}!\n\n"
         f"📸 Услуга: {data['service']}\n"
         f"👤 Имя: {data['name']}\n"
         f"📞 Телефон: {data['phone']}\n"
@@ -214,15 +271,24 @@ async def get_time(message: Message, state: FSMContext):
         f"📅 Дата: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
     )
 
+    # Кнопка отмены
+    cancel_menu = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=f"❌ Отменить запись #{booking_id}")],
+            [KeyboardButton(text="📅 Записаться")]
+        ],
+        resize_keyboard=True
+    )
+
     await message.answer(
-        "✅ Заявка принята!\n\n"
+        f"✅ Заявка #{booking_id} принята!\n\n"
         "📋 Ваши данные:\n"
         f"📸 Услуга: {data['service']}\n"
         f"👤 Имя: {data['name']}\n"
         f"📞 Телефон: {data['phone']}\n"
         f"🕐 Время: {data['time']}\n\n"
         "Анна свяжется с вами в течение 2 часов. Спасибо! 🙏",
-        reply_markup=main_menu
+        reply_markup=cancel_menu
     )
 
 async def main():
