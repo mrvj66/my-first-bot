@@ -2,13 +2,14 @@ import os
 import asyncio
 import sqlite3
 from datetime import datetime
+from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
-from dotenv import load_dotenv
+
 load_dotenv()
 
 TOKEN = os.getenv("BOT_TOKEN")
@@ -24,6 +25,7 @@ def init_db():
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS bookings (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            service TEXT,
             name TEXT,
             phone TEXT,
             time TEXT,
@@ -33,12 +35,12 @@ def init_db():
     conn.commit()
     conn.close()
 
-def save_booking(name, phone, time):
+def save_booking(service, name, phone, time):
     conn = sqlite3.connect("bookings.db")
     cursor = conn.cursor()
     cursor.execute(
-        "INSERT INTO bookings (name, phone, time, date) VALUES (?, ?, ?, ?)",
-        (name, phone, time, datetime.now().strftime("%d.%m.%Y %H:%M"))
+        "INSERT INTO bookings (service, name, phone, time, date) VALUES (?, ?, ?, ?, ?)",
+        (service, name, phone, time, datetime.now().strftime("%d.%m.%Y %H:%M"))
     )
     conn.commit()
     conn.close()
@@ -46,13 +48,14 @@ def save_booking(name, phone, time):
 def get_all_bookings():
     conn = sqlite3.connect("bookings.db")
     cursor = conn.cursor()
-    cursor.execute("SELECT id, name, phone, time, date FROM bookings ORDER BY id DESC")
+    cursor.execute("SELECT id, service, name, phone, time, date FROM bookings ORDER BY id DESC")
     rows = cursor.fetchall()
     conn.close()
     return rows
 
 # ─── ШАГИ ЗАПИСИ ───
 class Booking(StatesGroup):
+    service = State()
     name = State()
     phone = State()
     time = State()
@@ -60,6 +63,15 @@ class Booking(StatesGroup):
 # ─── МЕНЮ ───
 main_menu = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text="📅 Записаться")]],
+    resize_keyboard=True
+)
+
+service_menu = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="👤 Портретная съёмка")],
+        [KeyboardButton(text="💍 Свадебная съёмка")],
+        [KeyboardButton(text="👶 Детская съёмка")]
+    ],
     resize_keyboard=True
 )
 
@@ -97,10 +109,11 @@ async def cmd_admin(message: Message):
     text = "📋 Все заявки:\n\n"
     for b in bookings:
         text += (
-            f"#{b[0]} · {b[4]}\n"
-            f"👤 {b[1]}\n"
-            f"📞 {b[2]}\n"
-            f"🕐 {b[3]}\n"
+            f"#{b[0]} · {b[5]}\n"
+            f"📸 Услуга: {b[1]}\n"
+            f"👤 Имя: {b[2]}\n"
+            f"📞 Телефон: {b[3]}\n"
+            f"🕐 Время: {b[4]}\n"
             f"─────────────\n"
         )
 
@@ -109,10 +122,21 @@ async def cmd_admin(message: Message):
 # ─── ЗАПИСЬ ───
 @dp.message(F.text == "📅 Записаться")
 async def start_booking(message: Message, state: FSMContext):
+    await state.set_state(Booking.service)
+    await message.answer(
+        "Шаг 1 из 4\n\n"
+        "Какая съёмка вас интересует?",
+        reply_markup=service_menu
+    )
+
+@dp.message(Booking.service)
+async def get_service(message: Message, state: FSMContext):
+    await state.update_data(service=message.text)
     await state.set_state(Booking.name)
     await message.answer(
-        "Шаг 1 из 3\n\n"
-        "Как тебя зовут?",
+        f"Отличный выбор! ✨\n\n"
+        "Шаг 2 из 4\n\n"
+        "Как вас зовут?",
         reply_markup=ReplyKeyboardRemove()
     )
 
@@ -122,8 +146,8 @@ async def get_name(message: Message, state: FSMContext):
     await state.set_state(Booking.phone)
     await message.answer(
         f"Приятно познакомиться, {message.text}! 😊\n\n"
-        "Шаг 2 из 3\n\n"
-        "Напиши свой номер телефона:"
+        "Шаг 3 из 4\n\n"
+        "Напишите свой номер телефона:"
     )
 
 @dp.message(Booking.phone)
@@ -131,8 +155,8 @@ async def get_phone(message: Message, state: FSMContext):
     await state.update_data(phone=message.text)
     await state.set_state(Booking.time)
     await message.answer(
-        "Шаг 3 из 3\n\n"
-        "Выбери удобное время:",
+        "Шаг 4 из 4\n\n"
+        "Выберите удобное время:",
         reply_markup=time_menu
     )
 
@@ -142,12 +166,13 @@ async def get_time(message: Message, state: FSMContext):
     data = await state.get_data()
     await state.clear()
 
-    save_booking(data['name'], data['phone'], data['time'])
+    save_booking(data['service'], data['name'], data['phone'], data['time'])
 
     # Уведомление владельцу
     await bot.send_message(
         ADMIN_ID,
         f"🔔 Новая заявка!\n\n"
+        f"📸 Услуга: {data['service']}\n"
         f"👤 Имя: {data['name']}\n"
         f"📞 Телефон: {data['phone']}\n"
         f"🕐 Время: {data['time']}\n"
@@ -155,8 +180,9 @@ async def get_time(message: Message, state: FSMContext):
     )
 
     await message.answer(
-        "✅ Заявка принята и сохранена!\n\n"
+        "✅ Заявка принята!\n\n"
         "📋 Ваши данные:\n"
+        f"📸 Услуга: {data['service']}\n"
         f"👤 Имя: {data['name']}\n"
         f"📞 Телефон: {data['phone']}\n"
         f"🕐 Время: {data['time']}\n\n"
