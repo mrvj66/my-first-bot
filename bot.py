@@ -1,7 +1,7 @@
 import os
 import asyncio
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
@@ -28,21 +28,23 @@ def init_db():
             service TEXT,
             name TEXT,
             phone TEXT,
-            time TEXT,
             date TEXT,
+            time TEXT,
+            created_at TEXT,
             status TEXT DEFAULT 'active',
-            user_id INTEGER
+            user_id INTEGER,
+            reminded INTEGER DEFAULT 0
         )
     """)
     conn.commit()
     conn.close()
 
-def save_booking(service, name, phone, time, user_id):
+def save_booking(service, name, phone, date, time, user_id):
     conn = sqlite3.connect("bookings.db")
     cursor = conn.cursor()
     cursor.execute(
-        "INSERT INTO bookings (service, name, phone, time, date, user_id) VALUES (?, ?, ?, ?, ?, ?)",
-        (service, name, phone, time, datetime.now().strftime("%d.%m.%Y %H:%M"), user_id)
+        "INSERT INTO bookings (service, name, phone, date, time, created_at, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (service, name, phone, date, time, datetime.now().strftime("%d.%m.%Y %H:%M"), user_id)
     )
     booking_id = cursor.lastrowid
     conn.commit()
@@ -59,7 +61,7 @@ def cancel_booking(booking_id):
 def get_booking_by_id(booking_id):
     conn = sqlite3.connect("bookings.db")
     cursor = conn.cursor()
-    cursor.execute("SELECT id, service, name, phone, time, date, status FROM bookings WHERE id = ?", (booking_id,))
+    cursor.execute("SELECT id, service, name, phone, date, time, created_at, status, user_id FROM bookings WHERE id = ?", (booking_id,))
     row = cursor.fetchone()
     conn.close()
     return row
@@ -75,16 +77,37 @@ def get_all_users():
 def get_all_bookings():
     conn = sqlite3.connect("bookings.db")
     cursor = conn.cursor()
-    cursor.execute("SELECT id, service, name, phone, time, date, status FROM bookings ORDER BY id DESC")
+    cursor.execute("SELECT id, service, name, phone, date, time, created_at, status FROM bookings ORDER BY id DESC")
     rows = cursor.fetchall()
     conn.close()
     return rows
+
+def get_tomorrow_bookings():
+    tomorrow = (datetime.now() + timedelta(days=1)).strftime("%d.%m.%Y")
+    conn = sqlite3.connect("bookings.db")
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, service, name, phone, date, time, user_id
+        FROM bookings
+        WHERE date = ? AND status = 'active' AND reminded = 0
+    """, (tomorrow,))
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+def mark_reminded(booking_id):
+    conn = sqlite3.connect("bookings.db")
+    cursor = conn.cursor()
+    cursor.execute("UPDATE bookings SET reminded = 1 WHERE id = ?", (booking_id,))
+    conn.commit()
+    conn.close()
 
 # ─── ШАГИ ЗАПИСИ ───
 class Booking(StatesGroup):
     service = State()
     name = State()
     phone = State()
+    date = State()
     time = State()
 
 # ─── МЕНЮ ───
@@ -109,6 +132,35 @@ time_menu = ReplyKeyboardMarkup(
     ],
     resize_keyboard=True
 )
+
+# ─── НАПОМИНАНИЯ ───
+async def send_reminders():
+    while True:
+        bookings = get_tomorrow_bookings()
+        for b in bookings:
+            try:
+                await bot.send_message(
+                    b[6],
+                    f"🔔 Напоминание о съёмке!\n\n"
+                    f"Привет, {b[2]}! Напоминаем что завтра у вас съёмка:\n\n"
+                    f"📸 Услуга: {b[1]}\n"
+                    f"📅 Дата: {b[4]}\n"
+                    f"🕐 Время: {b[5]}\n\n"
+                    f"Ждём вас! Если есть вопросы — свяжитесь с Анной. 🙏"
+                )
+                mark_reminded(b[0])
+
+                # Уведомление владельцу
+                await bot.send_message(
+                    ADMIN_ID,
+                    f"📤 Напоминание отправлено клиенту!\n\n"
+                    f"👤 {b[2]} · {b[4]} · {b[5]}"
+                )
+            except Exception:
+                pass
+
+        # Проверяем каждый час
+        await asyncio.sleep(3600)
 
 # ─── КОМАНДЫ ───
 @dp.message(Command("start"))
@@ -136,13 +188,14 @@ async def cmd_admin(message: Message):
 
     text = "📋 Все заявки:\n\n"
     for b in bookings:
-        status = "✅ Активна" if b[6] == "active" else "❌ Отменена"
+        status = "✅ Активна" if b[7] == "active" else "❌ Отменена"
         text += (
-            f"#{b[0]} · {b[5]} · {status}\n"
+            f"#{b[0]} · {b[6]} · {status}\n"
             f"📸 Услуга: {b[1]}\n"
             f"👤 Имя: {b[2]}\n"
             f"📞 Телефон: {b[3]}\n"
-            f"🕐 Время: {b[4]}\n"
+            f"📅 Дата: {b[4]}\n"
+            f"🕐 Время: {b[5]}\n"
             f"─────────────\n"
         )
 
@@ -230,7 +283,7 @@ async def cancel_handler(message: Message):
             await message.answer("❌ Заявка не найдена.")
             return
 
-        if booking[6] == "cancelled":
+        if booking[7] == "cancelled":
             await message.answer("⚠️ Эта заявка уже отменена.")
             return
 
@@ -242,7 +295,8 @@ async def cancel_handler(message: Message):
             f"📸 Услуга: {booking[1]}\n"
             f"👤 Имя: {booking[2]}\n"
             f"📞 Телефон: {booking[3]}\n"
-            f"🕐 Время: {booking[4]}"
+            f"📅 Дата: {booking[4]}\n"
+            f"🕐 Время: {booking[5]}"
         )
 
         await message.answer(
@@ -259,7 +313,7 @@ async def cancel_handler(message: Message):
 async def start_booking(message: Message, state: FSMContext):
     await state.set_state(Booking.service)
     await message.answer(
-        "Шаг 1 из 4\n\n"
+        "Шаг 1 из 5\n\n"
         "Какая съёмка вас интересует?",
         reply_markup=service_menu
     )
@@ -270,7 +324,7 @@ async def get_service(message: Message, state: FSMContext):
     await state.set_state(Booking.name)
     await message.answer(
         "Отличный выбор! ✨\n\n"
-        "Шаг 2 из 4\n\n"
+        "Шаг 2 из 5\n\n"
         "Как вас зовут?",
         reply_markup=ReplyKeyboardRemove()
     )
@@ -281,16 +335,37 @@ async def get_name(message: Message, state: FSMContext):
     await state.set_state(Booking.phone)
     await message.answer(
         f"Приятно познакомиться, {message.text}! 😊\n\n"
-        "Шаг 3 из 4\n\n"
+        "Шаг 3 из 5\n\n"
         "Напишите свой номер телефона:"
     )
 
 @dp.message(Booking.phone)
 async def get_phone(message: Message, state: FSMContext):
     await state.update_data(phone=message.text)
+    await state.set_state(Booking.date)
+    await message.answer(
+        "Шаг 4 из 5\n\n"
+        "Напишите желаемую дату съёмки в формате ДД.ММ.ГГГГ\n\n"
+        "Например: 25.07.2026"
+    )
+
+@dp.message(Booking.date)
+async def get_date(message: Message, state: FSMContext):
+    # Проверяем формат даты
+    try:
+        datetime.strptime(message.text, "%d.%m.%Y")
+    except ValueError:
+        await message.answer(
+            "❌ Неверный формат даты.\n\n"
+            "Напишите дату в формате ДД.ММ.ГГГГ\n"
+            "Например: 25.07.2026"
+        )
+        return
+
+    await state.update_data(date=message.text)
     await state.set_state(Booking.time)
     await message.answer(
-        "Шаг 4 из 4\n\n"
+        "Шаг 5 из 5\n\n"
         "Выберите удобное время:",
         reply_markup=time_menu
     )
@@ -303,8 +378,8 @@ async def get_time(message: Message, state: FSMContext):
 
     booking_id = save_booking(
         data['service'], data['name'],
-        data['phone'], data['time'],
-        message.from_user.id
+        data['phone'], data['date'],
+        data['time'], message.from_user.id
     )
 
     await bot.send_message(
@@ -313,8 +388,9 @@ async def get_time(message: Message, state: FSMContext):
         f"📸 Услуга: {data['service']}\n"
         f"👤 Имя: {data['name']}\n"
         f"📞 Телефон: {data['phone']}\n"
+        f"📅 Дата: {data['date']}\n"
         f"🕐 Время: {data['time']}\n"
-        f"📅 Дата: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+        f"🗓 Создана: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
     )
 
     cancel_menu = ReplyKeyboardMarkup(
@@ -331,7 +407,9 @@ async def get_time(message: Message, state: FSMContext):
         f"📸 Услуга: {data['service']}\n"
         f"👤 Имя: {data['name']}\n"
         f"📞 Телефон: {data['phone']}\n"
+        f"📅 Дата: {data['date']}\n"
         f"🕐 Время: {data['time']}\n\n"
+        "За день до съёмки вы получите напоминание. "
         "Анна свяжется с вами в течение 2 часов. Спасибо! 🙏",
         reply_markup=cancel_menu
     )
@@ -339,6 +417,8 @@ async def get_time(message: Message, state: FSMContext):
 async def main():
     init_db()
     print("Бот запущен! База данных подключена.")
+    # Запускаем напоминания параллельно с ботом
+    asyncio.create_task(send_reminders())
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
