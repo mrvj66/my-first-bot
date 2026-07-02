@@ -64,6 +64,14 @@ def get_booking_by_id(booking_id):
     conn.close()
     return row
 
+def get_all_users():
+    conn = sqlite3.connect("bookings.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT DISTINCT user_id FROM bookings WHERE user_id IS NOT NULL")
+    rows = cursor.fetchall()
+    conn.close()
+    return [row[0] for row in rows]
+
 def get_all_bookings():
     conn = sqlite3.connect("bookings.db")
     cursor = conn.cursor()
@@ -187,6 +195,49 @@ async def cancel_handler(message: Message):
             return
 
         cancel_booking(booking_id)
+
+@dp.message(Command("broadcast"))
+async def cmd_broadcast(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ У вас нет доступа к этой команде.")
+        return
+
+    # Получаем текст после команды /broadcast
+    text = message.text.replace("/broadcast", "").strip()
+
+    if not text:
+        await message.answer(
+            "📢 Чтобы отправить рассылку напиши:\n\n"
+            "/broadcast текст сообщения\n\n"
+            "Например:\n"
+            "/broadcast Привет! В декабре скидка 20% на все съёмки 🎄"
+        )
+        return
+
+    users = get_all_users()
+
+    if not users:
+        await message.answer("📭 Пока нет клиентов для рассылки.")
+        return
+
+    success = 0
+    failed = 0
+
+    for user_id in users:
+        try:
+            await bot.send_message(
+                user_id,
+                f"📢 Сообщение от Анны Соколовой:\n\n{text}"
+            )
+            success += 1
+        except Exception:
+            failed += 1
+
+    await message.answer(
+        f"✅ Рассылка завершена!\n\n"
+        f"📨 Отправлено: {success}\n"
+        f"❌ Не доставлено: {failed}"
+    )
 
         # Уведомление владельцу
         await bot.send_message(
