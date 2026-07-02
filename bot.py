@@ -117,8 +117,8 @@ async def cmd_start(message: Message, state: FSMContext):
     await message.answer(
         f"Привет, {message.from_user.first_name}! 👋\n\n"
         "Я помогу записаться на съёмку к фотографу Анне Соколовой.\n\n"
-"/portfolio — посмотреть услуги и цены\n"
-"Или нажми кнопку ниже чтобы записаться 👇",
+        "/portfolio — посмотреть услуги и цены\n"
+        "Или нажми кнопку ниже чтобы записаться 👇",
         reply_markup=main_menu
     )
 
@@ -147,74 +147,43 @@ async def cmd_admin(message: Message):
         )
 
     await message.answer(text)
+
 @dp.message(Command("portfolio"))
 async def cmd_portfolio(message: Message):
     await message.answer(
         "📸 Портфолио Анны Соколовой\n\n"
         "Вот примеры моих работ по каждой услуге:"
     )
-
     await message.answer(
         "👤 Портретная съёмка\n\n"
         "Студийные и уличные портреты.\n"
         "Индивидуальные и парные.\n\n"
         "💰 от 8 000 ₽ · 2 часа · 30 фото"
     )
-
     await message.answer(
         "💍 Свадебная съёмка\n\n"
         "Весь день рядом — от сборов до первого танца.\n"
         "Живые эмоции без постановок.\n\n"
         "💰 от 40 000 ₽ · весь день · 200+ фото"
     )
-
     await message.answer(
         "👶 Детская съёмка\n\n"
         "Снимаю игру, удивление и смех.\n"
         "Нахожу общий язык с детьми любого возраста.\n\n"
         "💰 от 6 000 ₽ · 1.5 часа · 25 фото"
     )
-
     await message.answer(
         "Хотите записаться на съёмку?\n"
         "Нажмите кнопку ниже 👇",
         reply_markup=main_menu
     )
-@dp.message(F.text.startswith("❌ Отменить запись #"))
-async def cancel_handler(message: Message):
-    try:
-        booking_id = int(message.text.split("#")[1])
-        booking = get_booking_by_id(booking_id)
 
-        if not booking:
-            await message.answer("❌ Заявка не найдена.")
-            return
+@dp.message(Command("broadcast"))
+async def cmd_broadcast(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ У вас нет доступа к этой команде.")
+        return
 
-        if booking[6] == "cancelled":
-            await message.answer("⚠️ Эта заявка уже отменена.")
-            return
-
-        cancel_booking(booking_id)
-
-        await bot.send_message(
-            ADMIN_ID,
-            f"⚠️ Заявка #{booking_id} отменена!\n\n"
-            f"📸 Услуга: {booking[1]}\n"
-            f"👤 Имя: {booking[2]}\n"
-            f"📞 Телефон: {booking[3]}\n"
-            f"🕐 Время: {booking[4]}"
-        )
-
-        await message.answer(
-            f"✅ Заявка #{booking_id} успешно отменена.\n\n"
-            "Если захотите записаться снова — нажмите кнопку ниже 👇",
-            reply_markup=main_menu
-        )
-
-    except Exception as e:
-        await message.answer("❌ Что-то пошло не так. Попробуйте снова.")
-
-    # Получаем текст после команды /broadcast
     text = message.text.replace("/broadcast", "").strip()
 
     if not text:
@@ -251,7 +220,22 @@ async def cancel_handler(message: Message):
         f"❌ Не доставлено: {failed}"
     )
 
-        # Уведомление владельцу
+@dp.message(F.text.startswith("❌ Отменить запись #"))
+async def cancel_handler(message: Message):
+    try:
+        booking_id = int(message.text.split("#")[1])
+        booking = get_booking_by_id(booking_id)
+
+        if not booking:
+            await message.answer("❌ Заявка не найдена.")
+            return
+
+        if booking[6] == "cancelled":
+            await message.answer("⚠️ Эта заявка уже отменена.")
+            return
+
+        cancel_booking(booking_id)
+
         await bot.send_message(
             ADMIN_ID,
             f"⚠️ Заявка #{booking_id} отменена!\n\n"
@@ -267,7 +251,7 @@ async def cancel_handler(message: Message):
             reply_markup=main_menu
         )
 
-    except Exception as e:
+    except Exception:
         await message.answer("❌ Что-то пошло не так. Попробуйте снова.")
 
 # ─── ЗАПИСЬ ───
@@ -285,7 +269,7 @@ async def get_service(message: Message, state: FSMContext):
     await state.update_data(service=message.text)
     await state.set_state(Booking.name)
     await message.answer(
-        f"Отличный выбор! ✨\n\n"
+        "Отличный выбор! ✨\n\n"
         "Шаг 2 из 4\n\n"
         "Как вас зовут?",
         reply_markup=ReplyKeyboardRemove()
@@ -323,7 +307,6 @@ async def get_time(message: Message, state: FSMContext):
         message.from_user.id
     )
 
-    # Уведомление владельцу
     await bot.send_message(
         ADMIN_ID,
         f"🔔 Новая заявка #{booking_id}!\n\n"
@@ -334,7 +317,6 @@ async def get_time(message: Message, state: FSMContext):
         f"📅 Дата: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
     )
 
-    # Кнопка отмены
     cancel_menu = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text=f"❌ Отменить запись #{booking_id}")],
