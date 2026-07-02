@@ -89,8 +89,9 @@ async def cmd_start(message: Message, state: FSMContext):
     await state.clear()
     await message.answer(
         f"Привет, {message.from_user.first_name}! 👋\n\n"
-        "Я помогу записаться на съёмку к фотографу Анне Соколовой.\n"
-        "Нажми кнопку ниже чтобы начать.",
+        "Я помогу записаться на съёмку к фотографу Анне Соколовой.\n\n"
+"/portfolio — посмотреть услуги и цены\n"
+"Или нажми кнопку ниже чтобы записаться 👇",
         reply_markup=main_menu
     )
 
@@ -118,6 +119,40 @@ async def cmd_admin(message: Message):
         )
 
     await message.answer(text)
+
+@dp.message(Command("portfolio"))
+async def cmd_portfolio(message: Message):
+    await message.answer(
+        "📸 Портфолио Анны Соколовой\n\n"
+        "Вот примеры моих работ по каждой услуге:"
+    )
+
+    await message.answer(
+        "👤 Портретная съёмка\n\n"
+        "Студийные и уличные портреты.\n"
+        "Индивидуальные и парные.\n\n"
+        "💰 от 8 000 ₽ · 2 часа · 30 фото"
+    )
+
+    await message.answer(
+        "💍 Свадебная съёмка\n\n"
+        "Весь день рядом — от сборов до первого танца.\n"
+        "Живые эмоции без постановок.\n\n"
+        "💰 от 40 000 ₽ · весь день · 200+ фото"
+    )
+
+    await message.answer(
+        "👶 Детская съёмка\n\n"
+        "Снимаю игру, удивление и смех.\n"
+        "Нахожу общий язык с детьми любого возраста.\n\n"
+        "💰 от 6 000 ₽ · 1.5 часа · 25 фото"
+    )
+
+    await message.answer(
+        "Хотите записаться на съёмку?\n"
+        "Нажмите кнопку ниже 👇",
+        reply_markup=main_menu
+    )
 
 # ─── ЗАПИСЬ ───
 @dp.message(F.text == "📅 Записаться")
