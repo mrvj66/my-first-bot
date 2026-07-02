@@ -196,11 +196,23 @@ async def cancel_handler(message: Message):
 
         cancel_booking(booking_id)
 
-@dp.message(Command("broadcast"))
-async def cmd_broadcast(message: Message):
-    if message.from_user.id != ADMIN_ID:
-        await message.answer("⛔ У вас нет доступа к этой команде.")
-        return
+        await bot.send_message(
+            ADMIN_ID,
+            f"⚠️ Заявка #{booking_id} отменена!\n\n"
+            f"📸 Услуга: {booking[1]}\n"
+            f"👤 Имя: {booking[2]}\n"
+            f"📞 Телефон: {booking[3]}\n"
+            f"🕐 Время: {booking[4]}"
+        )
+
+        await message.answer(
+            f"✅ Заявка #{booking_id} успешно отменена.\n\n"
+            "Если захотите записаться снова — нажмите кнопку ниже 👇",
+            reply_markup=main_menu
+        )
+
+    except Exception as e:
+        await message.answer("❌ Что-то пошло не так. Попробуйте снова.")
 
     # Получаем текст после команды /broadcast
     text = message.text.replace("/broadcast", "").strip()
